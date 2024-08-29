@@ -19,5 +19,10 @@ cloud_wd <- getwd()
 setwd(cloud_wd)
 ```
 
+# Review Data Dictionary
+```{r}
+HomeCredit_data_dictionary <- read.csv("HomeCredit_columns_description.csv")
 
+HomeCredit_data_dictionary
+```
 
