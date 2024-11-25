@@ -1,0 +1,2308 @@
+---
+title: "Home Credit Exploratory Data Analysis"
+author: "Whitney Holt"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+    keep_tex: true
+  html_document:
+    toc: true
+execute:
+  warning: false
+  message: false
+header-includes:
+  - \usepackage{listings}
+  - \lstset{breaklines=true}
+---
+
+```{r setup, include=FALSE, echo = FALSE}
+# Loading required packages
+library(tidyverse)
+library(caret)
+library(psych)
+library(knitr)
+```
+
+# Introduction
+
+Home Credit is an international consumer finance provider focused on responsibly lending to people with little to no credit history. To continue serving the unbanked, the company needs to confidently and accurately predict which prospective borrowers are likely to repay loans. Accurate loan repayment predictions enable Home Credit to foster financial inclusion while safeguarding the necessary enterprise profitability to sustain its mission.
+
+The purpose of this project is to create a model to accurately predict which prospective borrowers are likely to repay loans. The specific target variable we will be predicting is called "target", and represents each client's ability to repay a loan (1 - client with payment difficulties: he/she had late payment more than X days on at least one of the first Y installments of the loan in our sample, 0 - all other cases).
+
+The purpose of this exploratory data analysis (EDA) is to:
+
+  -   Understand what data is available for the project
+  -   Understand the scope of missing data and propose solutions
+  -   Identify patterns within the available data and characteristics of each variable
+  -   Understand relationships between variables
+  
+Questions about the data to explore:
+
+  -   Is the data unbalanced with respect to the target? 
+  -   What would the accuracy be for a simple model consisting in a majority class classifier?
+  -   Are there strong predictors that could be included later in a model?
+  -   Which variables have missing data? 
+  -   What is the best solution for each variable with missing data?
+  -   Do the values make sense? Are there mistaken values that should be cleaned or imputed?
+  -   Are there columns with near-zero or zero variance?
+  -   Will the input data need to be transformed in order to be used in a model?
+
+# Description of available data
+
+Discuss the data available for the project.
+
+```{r}
+# Loading the data dictionary
+HomeCredit_data_dictionary <- read.csv("HomeCredit_columns_description.csv")
+```
+
+```{r}
+# Counting the number of columns in each data set
+HomeCredit_data_dictionary %>%
+  group_by(Table) %>%
+  summarize(count = n())
+```
+
+There are 206 predictor variables available across the 7 available data sets:
+
+  -   **120 predictors** in the **application train | test** data set (excluding ID and target variables: *SK_ID_CURR*, *TARGET*)
+  -   **15 predictors** in the **bureau** data set (excluding ID variables: *SK_ID_CURR*, *SK_BUREAU_ID*)
+  -   **2 predictors** in the **bureau balance** data set (excluding ID variables: *SK_BUREAU_ID*) 
+  -   **6 predictors** in the **POS CASH balance** data set (excluding ID variables: *SK_ID_PREV*, *SK_ID_CURR*)
+  -   **21 predictors** in the **credit card balance** data set (excluding ID variables: *SK_ID_PREV*, *SK_ID_CURR*)
+  -   **36 predictors** in the **previous application** data set (excluding ID variables: *SK_ID_PREV*, *SK_ID_CURR*)
+  -   **6 predictors** in the **installments payments** data set (excluding ID variables: *SK_ID_PREV*, *SK_ID_CURR*)
+  
+The final model will likely not include all predictors from all available data sets. Some data sets are provided at various levels of granularity and will potentially be excluded for simplicity's sake.
+
+# Data Exploration
+
+Starting with and potentially focusing on the application_{train|test}.csv data sets.
+
+Loading the application_{train|test}.csv data sets:
+
+```{r}
+# Loading the application train set
+HomeCredit_application_train_data <- read.csv("application_train.csv")
+```
+
+## Target Variable
+
+Exploring the target variable in application_{train|test}.csv. 
+
+Questions of interest:
+
+  -   Is the data unbalanced with respect to the target? 
+  -   What would the accuracy be for a simple model consisting in a majority class classifier?
+  
+```{r}
+# Creating a balance table of the target variable
+HomeCredit_application_train_data %>%
+  group_by(TARGET) %>%
+  summarise(n  = n(),
+            proportion = n / nrow(HomeCredit_application_train_data)) %>% 
+  round(digits = 2)
+```
+
+The data is **highly imbalanced** with respect to the target. A majority class classifier would have an accuracy of 92%.
+
+## Missing Data
+  
+Questions of interest:
+
+  -   What is the scope of missing data in application_{train|test}.csv?
+  -   What are possible solutions?
+  -   Which solutions should be applied to which columns?
+
+### Scope of Missing Data
+
+How many columns in application_{train|test}.csv have missing data?
+
+```{r}
+# Identifying columns with missing data in the train data
+missing_values <- HomeCredit_application_train_data %>%
+  summarise(across(everything(), ~ sum(is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "column", 
+               values_to = "missing_count") %>%
+  filter(missing_count > 0) %>%
+  arrange(desc(missing_count))
+
+missing_values
+```
+
+The application_train.csv data set has missing data in 61 of the 122 columns.
+
+### Possible Solutions for Columns with Missing Data
+
+Creating a new data frame, HomeCredit_application_train_data_clean to store cleaned variables in alongside variables that don't need cleaning while maintaining the integrity of the raw data.
+
+```{r}
+# Creating a new data frame, HomeCredit_application_train_data_clean
+HomeCredit_application_train_data_clean <- HomeCredit_application_train_data
+```
+
+**AMT_ANNUITY**
+
+AMT_ANNUITY is the loan annuity value.
+
+```{r}
+# Viewing the distribution of of AMT_ANNUITY
+summary(HomeCredit_application_train_data_clean$AMT_ANNUITY)
+ggplot(HomeCredit_application_train_data_clean, aes(x = AMT_ANNUITY)) +
+  geom_histogram(color = "black") +
+  labs(title = "Distribution of AMT_ANNUITY", 
+       x = "AMT_ANNUITY", 
+       y = "Count") +
+  theme_minimal()
+```
+
+Assumptions & Approach:
+
+  -   This is a continuous, numeric variable representing the loan annuity value
+  -   There are few (12) missing values in the training data set
+  -   Since this should have been reported for every participant, we will impute missing values using the median since the data is skewed
+
+```{r}
+# Imputing missing values in AMT_ANNUITY using the Median
+HomeCredit_application_train_data_clean <- 
+  HomeCredit_application_train_data_clean %>%
+  mutate(AMT_ANNUITY = if_else(is.na(AMT_ANNUITY), 
+                               median(AMT_ANNUITY, na.rm = TRUE), 
+                               AMT_ANNUITY))
+
+# Viewing the distribution of of AMT_ANNUITY after imputing
+summary(HomeCredit_application_train_data_clean$AMT_ANNUITY)
+ggplot(HomeCredit_application_train_data_clean, aes(x = AMT_ANNUITY)) +
+  geom_histogram(color = "black") +
+  labs(title = "Distribution of Imputed AMT_ANNUITY", 
+       x = "AMT_ANNUITY", 
+       y = "Count") +
+  theme_minimal()
+```
+
+The distribution of AMT_ANNUITY after imputing looks very similar to the variable's distribution prior to imputing.
+
+**AMT_GOODS_PRICE**
+
+AMT_GOODS_PRICE is, for consumer loans, the price of the goods for which the loan is given.
+
+```{r}
+# Viewing the distribution of of AMT_GOODS_PRICE
+summary(HomeCredit_application_train_data_clean$AMT_GOODS_PRICE)
+ggplot(HomeCredit_application_train_data_clean, aes(x = AMT_GOODS_PRICE)) +
+  geom_histogram(color = "black") +
+  labs(title = "Distribution of AMT_GOODS_PRICE", 
+       x = "AMT_GOODS_PRICE", 
+       y = "Count") +
+  theme_minimal()
+```
+
+Are the missing values here for non-consumer loans?
+
+```{r}
+# Quering unique values of NAME_CONTRACT_TYPE where AMT_GOODS_PRICE is NA
+HomeCredit_application_train_data_clean %>%
+  filter(is.na(AMT_GOODS_PRICE)) %>%
+  distinct(NAME_CONTRACT_TYPE)
+```
+
+The missing values have a contract type that is not a consumer loan. In this case, all 278 missing values are revolving loans. 
+
+Assumptions & Approach:
+
+  -   If there is no value for an individual, they had a non-consumer loan
+  -   Since AMT_GOODS_PRICE is skewed, we'll take the log transform of the variable
+  -   Bin the log transformed variable into "low", "low-medium", "medium", "medium-high", "high", and "non-consumer loan"
+  
+```{r}
+# Viewing the distribution of of log(AMT_GOODS_PRICE)
+summary(log(HomeCredit_application_train_data_clean$AMT_GOODS_PRICE))
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(x = log(AMT_GOODS_PRICE))) +
+  geom_histogram(color = "black") +
+  labs(title = "Distribution of log(AMT_GOODS_PRICE)", 
+       x = "log(AMT_GOODS_PRICE)", 
+       y = "Count") +
+  theme_minimal()
+```
+
+This the log transformed distribution looks much more normal, but appears to be multi-modal. We will move forward with binning the log transform of AMT_GOODS_PRICE.
+
+```{r}
+# Binning the log transform of AMT_GOODS_PRICE into quintiles, keeping NAs as a separate class
+HomeCredit_application_train_data_clean <- 
+  HomeCredit_application_train_data_clean %>%
+  mutate(
+    AMT_GOODS_PRICE = case_when(
+      is.na(AMT_GOODS_PRICE) ~ "non-consumer loan",  # Handle missing values
+      TRUE ~ case_when(
+        ntile(log(AMT_GOODS_PRICE), 5) == 1 ~ "low",
+        ntile(log(AMT_GOODS_PRICE), 5) == 2 ~ "low-medium",
+        ntile(log(AMT_GOODS_PRICE), 5) == 3 ~ "medium",
+        ntile(log(AMT_GOODS_PRICE), 5) == 4 ~ "medium-high",
+        ntile(log(AMT_GOODS_PRICE), 5) == 5 ~ "high"
+      )
+    )
+  )
+
+# Viewing the distribution of of AMT_GOODS_PRICE after binning
+summary(HomeCredit_application_train_data_clean$AMT_GOODS_PRICE)
+ggplot(HomeCredit_application_train_data_clean, aes(x = AMT_GOODS_PRICE)) +
+  geom_bar(color = "black") +
+  labs(title = "Distribution of Binned AMT_GOODS_PRICE", 
+       x = "AMT_GOODS_PRICE", 
+       y = "Count") +
+  theme_minimal()
+```
+
+Existing AMT_GOODS_PRICE inputs have been binned into quintiles of their log-transformed value while the values that were previously missing have been categorized as non-consumer loans.
+
+**OWN_CAR_AGE**
+
+OWN_CAR_AGE is age of client's car.
+
+```{r}
+# Viewing the distribution of of OWN_CAR_AGE
+summary(HomeCredit_application_train_data_clean$OWN_CAR_AGE)
+ggplot(HomeCredit_application_train_data_clean, aes(x = OWN_CAR_AGE)) +
+  geom_histogram(color = "black") +
+  labs(title = "Distribution of OWN_CAR_AGE", 
+       x = "OWN_CAR_AGE", 
+       y = "Count") +
+  theme_minimal()
+```
+
+Assumptions & Approach:
+
+  -   If there is no value for an individual, we will assign them to the category "not reported"
+  -   Bin variable into "low", "low-medium", "medium", "medium-high", "high", and "not reported"
+
+```{r}
+# Binning the log transform of OWN_CAR_AGE into quintiles, keeping NAs as a separate class
+HomeCredit_application_train_data_clean <- 
+  HomeCredit_application_train_data_clean %>%
+  mutate(
+    OWN_CAR_AGE = case_when(
+      is.na(OWN_CAR_AGE) ~ "not reported",  # Handle missing values
+      TRUE ~ case_when(
+        ntile(OWN_CAR_AGE, 5) == 1 ~ "low",
+        ntile(OWN_CAR_AGE, 5) == 2 ~ "low-medium",
+        ntile(OWN_CAR_AGE, 5) == 3 ~ "medium",
+        ntile(OWN_CAR_AGE, 5) == 4 ~ "medium-high",
+        ntile(OWN_CAR_AGE, 5) == 5 ~ "high"
+      )
+    )
+  )
+
+# Viewing the distribution of of AMT_GOODS_PRICE after binning
+summary(HomeCredit_application_train_data_clean$OWN_CAR_AGE)
+ggplot(HomeCredit_application_train_data_clean, aes(x = OWN_CAR_AGE)) +
+  geom_bar(color = "black") +
+  labs(title = "Distribution of binned OWN_CAR_AGE", 
+       x = "OWN_CAR_AGE", 
+       y = "Count") +
+  theme_minimal()
+```
+
+Existing OWN_CAR_AGE inputs have been binned into quintiles while the values that were previously missing have been categorized as not reported. Over half of the data points did not report a value for OWN_CAR_AGE.
+
+**CNT_FAM_MEMBERS**
+
+CNT_FAM_MEMBERS is how many family members does client have.
+
+```{r}
+# Viewing the distribution of of CNT_FAM_MEMBERS
+summary(HomeCredit_application_train_data_clean$CNT_FAM_MEMBERS)
+ggplot(HomeCredit_application_train_data_clean, aes(x = CNT_FAM_MEMBERS)) +
+  geom_histogram(color = "black") +
+  labs(title = "Distribution of CNT_FAM_MEMBERS", 
+       x = "CNT_FAM_MEMBERS", 
+       y = "Count") +
+  theme_minimal()
+```
+
+Assumptions & Approach:
+
+  -   Since the values range from 1 - 20, we'll assume that if there is no value for the individual, they have 0 family members
+  -   Replace NAs with 0
+  
+```{r}
+# Replacing missing values in CNT_FAM_MEMBERS with 0
+HomeCredit_application_train_data_clean <- 
+  HomeCredit_application_train_data_clean %>%
+  mutate(CNT_FAM_MEMBERS = if_else(is.na(CNT_FAM_MEMBERS), 
+                               0, 
+                               CNT_FAM_MEMBERS))
+
+# Viewing the distribution of of CNT_FAM_MEMBERS after binning
+summary(HomeCredit_application_train_data_clean$CNT_FAM_MEMBERS)
+ggplot(HomeCredit_application_train_data_clean, aes(x = CNT_FAM_MEMBERS)) +
+  geom_histogram(color = "black") +
+  labs(title = "Distribution of cleaned CNT_FAM_MEMBERS", 
+       x = "CNT_FAM_MEMBERS", 
+       y = "Count") +
+  theme_minimal()
+```
+
+Missing values in the CNT_FAM_MEMBERS column have been replaced with zeros, assuming the lack of input indicates the individual does not have any family members.
+
+**EXT_SOURCE variables**
+
+EXT_SOURCE_1, EXT_SOURCE_2, and EXT_SOURCE_3 are normalized scores from external data sources.
+
+```{r}
+# Viewing the distribution of of EXT_SOURCE_1
+summary(HomeCredit_application_train_data_clean$EXT_SOURCE_1)
+ggplot(HomeCredit_application_train_data_clean, aes(x = EXT_SOURCE_1)) +
+  geom_histogram(color = "black") +
+  labs(title = "Distribution of EXT_SOURCE_1", 
+       x = "EXT_SOURCE_1", 
+       y = "Count") +
+  theme_minimal()
+
+# Viewing the distribution of of EXT_SOURCE_2
+summary(HomeCredit_application_train_data_clean$EXT_SOURCE_2)
+ggplot(HomeCredit_application_train_data_clean, aes(x = EXT_SOURCE_2)) +
+  geom_histogram(color = "black") +
+  labs(title = "Distribution of EXT_SOURCE_2", 
+       x = "EXT_SOURCE_2", 
+       y = "Count") +
+  theme_minimal()
+
+# Viewing the distribution of of EXT_SOURCE_3
+summary(HomeCredit_application_train_data_clean$EXT_SOURCE_3)
+ggplot(HomeCredit_application_train_data_clean, aes(x = EXT_SOURCE_3)) +
+  geom_histogram(color = "black") +
+  labs(title = "Distribution of EXT_SOURCE_3", 
+       x = "EXT_SOURCE_3", 
+       y = "Count") +
+  theme_minimal()
+```
+
+Assumptions & Approach:
+
+  -   If there is no value for an individual, they don't have a credit score meaning they haven't had a loan before
+  -   Bin these scores, keeping a category for those without scores
+
+```{r}
+# Binning the EXT_SOURCE variables into quintiles, keeping NAs
+HomeCredit_application_train_data_clean <- 
+  HomeCredit_application_train_data_clean %>%
+  mutate(
+    EXT_SOURCE_1 = case_when(
+      is.na(EXT_SOURCE_1) ~ "not reported",  # Handle missing values
+      TRUE ~ case_when(
+        ntile(EXT_SOURCE_1, 5) == 1 ~ "low",
+        ntile(EXT_SOURCE_1, 5) == 2 ~ "low-medium",
+        ntile(EXT_SOURCE_1, 5) == 3 ~ "medium",
+        ntile(EXT_SOURCE_1, 5) == 4 ~ "medium-high",
+        ntile(EXT_SOURCE_1, 5) == 5 ~ "high")),     
+    EXT_SOURCE_2 = case_when(
+      is.na(EXT_SOURCE_2) ~ "not reported",  # Handle missing values
+      TRUE ~ case_when(
+        ntile(EXT_SOURCE_2, 5) == 1 ~ "low",
+        ntile(EXT_SOURCE_2, 5) == 2 ~ "low-medium",
+        ntile(EXT_SOURCE_2, 5) == 3 ~ "medium",
+        ntile(EXT_SOURCE_2, 5) == 4 ~ "medium-high",
+        ntile(EXT_SOURCE_2, 5) == 5 ~ "high")),
+    EXT_SOURCE_3 = case_when(
+      is.na(EXT_SOURCE_3) ~ "not reported",  # Handle missing values
+      TRUE ~ case_when(
+        ntile(EXT_SOURCE_3, 5) == 1 ~ "low",
+        ntile(EXT_SOURCE_3, 5) == 2 ~ "low-medium",
+        ntile(EXT_SOURCE_3, 5) == 3 ~ "medium",
+        ntile(EXT_SOURCE_3, 5) == 4 ~ "medium-high",
+        ntile(EXT_SOURCE_3, 5) == 5 ~ "high"))
+  )
+
+# Viewing the distribution of of EXT_SOURCE_1
+summary(HomeCredit_application_train_data_clean$EXT_SOURCE_1)
+ggplot(HomeCredit_application_train_data_clean, aes(x = EXT_SOURCE_1)) +
+  geom_bar(color = "black") +
+  labs(title = "Distribution of binned EXT_SOURCE_1", 
+       x = "EXT_SOURCE_1", 
+       y = "Count") +
+  theme_minimal()
+
+# Viewing the distribution of of EXT_SOURCE_2
+summary(HomeCredit_application_train_data_clean$EXT_SOURCE_2)
+ggplot(HomeCredit_application_train_data_clean, aes(x = EXT_SOURCE_2)) +
+  geom_bar(color = "black") +
+  labs(title = "Distribution of binned EXT_SOURCE_2", 
+       x = "EXT_SOURCE_2", 
+       y = "Count") +
+  theme_minimal()
+
+# Viewing the distribution of of EXT_SOURCE_3
+summary(HomeCredit_application_train_data_clean$EXT_SOURCE_3)
+ggplot(HomeCredit_application_train_data_clean, aes(x = EXT_SOURCE_3)) +
+  geom_bar(color = "black") +
+  labs(title = "Distribution of binned EXT_SOURCE_3", 
+       x = "EXT_SOURCE_3", 
+       y = "Count") +
+  theme_minimal()
+```
+
+**Normalized Information about the building where the client lives**
+
+43 columns with missing data fit this description:
+
+  -   APARTMENTS_AVG
+  -   APARTMENTS_MEDI
+  -   APARTMENTS_MODE
+  -   BASEMENTAREA_AVG
+  -   BASEMENTAREA_MEDI
+  -   BASEMENTAREA_MODE
+  -   COMMONAREA_AVG
+  -   COMMONAREA_MEDI
+  -   COMMONAREA_MODE
+  -   ELEVATORS_AVG
+  -   ELEVATORS_MEDI
+  -   ELEVATORS_MODE
+  -   ENTRANCES_AVG
+  -   ENTRANCES_MEDI
+  -   ENTRANCES_MODE
+  -   FLOORSMAX_AVG
+  -   FLOORSMAX_MEDI
+  -   FLOORSMAX_MODE
+  -   FLOORSMIN_AVG
+  -   FLOORSMIN_MEDI
+  -   FLOORSMIN_MODE
+  -   LANDAREA_AVG
+  -   LANDAREA_MEDI
+  -   LANDAREA_MODE
+  -   LIVINGAPARTMENTS_AVG
+  -   LIVINGAPARTMENTS_MEDI
+  -   LIVINGAPARTMENTS_MODE
+  -   LIVINGAREA_AVG
+  -   LIVINGAREA_MEDI
+  -   LIVINGAREA_MODE
+  -   NONLIVINGAPARTMENTS_AVG
+  -   NONLIVINGAPARTMENTS_MEDI
+  -   NONLIVINGAPARTMENTS_MODE
+  -   NONLIVINGAREA_AVG
+  -   NONLIVINGAREA_MEDI
+  -   NONLIVINGAREA_MODE
+  -   TOTALAREA_MODE
+  -   YEARS_BEGINEXPLUATATION_AVG
+  -   YEARS_BEGINEXPLUATATION_MEDI
+  -   YEARS_BEGINEXPLUATATION_MODE
+  -   YEARS_BUILD_AVG
+  -   YEARS_BUILD_MEDI
+  -   YEARS_BUILD_MODE
+  
+What are the various values of HOUSETYPE_MODE?
+
+```{r}
+# Querying unique values of APARTMENTS_AVG where HOUSETYPE_MODE is NA
+HomeCredit_application_train_data_clean %>%
+  distinct(HOUSETYPE_MODE)
+```
+
+Assumptions & Approach:
+
+  -   None of the applicants are un-housed
+  -   If the variable's distribution includes 0 as a possible value, then we will assume the missing values do not indicate additional information
+  -   In the case that missing values do not indicate additional information, we will impute missing values using the median
+
+```{r}
+# Viewing the distribution of the variables
+## APARTMENTS_AVG
+summary(HomeCredit_application_train_data_clean$APARTMENTS_AVG)
+## APARTMENTS_MEDI
+summary(HomeCredit_application_train_data_clean$APARTMENTS_MEDI)
+## APARTMENTS_MODE
+summary(HomeCredit_application_train_data_clean$APARTMENTS_MODE)
+## BASEMENTAREA_AVG
+summary(HomeCredit_application_train_data_clean$BASEMENTAREA_AVG)
+## BASEMENTAREA_MEDI
+summary(HomeCredit_application_train_data_clean$BASEMENTAREA_MEDI)
+## BASEMENTAREA_MODE
+summary(HomeCredit_application_train_data_clean$BASEMENTAREA_MODE)
+## COMMONAREA_AVG
+summary(HomeCredit_application_train_data_clean$COMMONAREA_AVG)
+## COMMONAREA_MEDI
+summary(HomeCredit_application_train_data_clean$COMMONAREA_MEDI)
+## COMMONAREA_MODE
+summary(HomeCredit_application_train_data_clean$COMMONAREA_MODE)
+## ELEVATORS_AVG
+summary(HomeCredit_application_train_data_clean$ELEVATORS_AVG)
+## ELEVATORS_MEDI
+summary(HomeCredit_application_train_data_clean$ELEVATORS_MEDI)
+## ELEVATORS_MODE
+summary(HomeCredit_application_train_data_clean$ELEVATORS_MODE)
+## ENTRANCES_AVG
+summary(HomeCredit_application_train_data_clean$ENTRANCES_AVG)
+## ENTRANCES_MEDI
+summary(HomeCredit_application_train_data_clean$ENTRANCES_MEDI)
+## ENTRANCES_MODE
+summary(HomeCredit_application_train_data_clean$ENTRANCES_MODE)
+## FLOORSMAX_AVG
+summary(HomeCredit_application_train_data_clean$FLOORSMAX_AVG)
+## FLOORSMAX_MEDI
+summary(HomeCredit_application_train_data_clean$FLOORSMAX_MEDI)
+## FLOORSMAX_MODE
+summary(HomeCredit_application_train_data_clean$FLOORSMAX_MODE)
+## FLOORSMIN_AVG
+summary(HomeCredit_application_train_data_clean$FLOORSMIN_AVG)
+## FLOORSMIN_MEDI
+summary(HomeCredit_application_train_data_clean$FLOORSMIN_MEDI)
+## FLOORSMIN_MODE
+summary(HomeCredit_application_train_data_clean$FLOORSMIN_MODE)
+## LANDAREA_AVG
+summary(HomeCredit_application_train_data_clean$LANDAREA_AVG)
+## LANDAREA_MEDI
+summary(HomeCredit_application_train_data_clean$LANDAREA_MEDI)
+## LANDAREA_MODE
+summary(HomeCredit_application_train_data_clean$LANDAREA_MODE)
+## LIVINGAPARTMENTS_AVG
+summary(HomeCredit_application_train_data_clean$LIVINGAPARTMENTS_AVG)
+## LIVINGAPARTMENTS_MEDI
+summary(HomeCredit_application_train_data_clean$LIVINGAPARTMENTS_MEDI)
+## LIVINGAPARTMENTS_MODE
+summary(HomeCredit_application_train_data_clean$LIVINGAPARTMENTS_MODE)
+## LIVINGAREA_AVG
+summary(HomeCredit_application_train_data_clean$LIVINGAREA_AVG)
+## LIVINGAREA_MEDI
+summary(HomeCredit_application_train_data_clean$LIVINGAREA_MEDI)
+## LIVINGAREA_MODE
+summary(HomeCredit_application_train_data_clean$LIVINGAREA_MODE)
+## NONLIVINGAPARTMENTS_AVG
+summary(HomeCredit_application_train_data_clean$NONLIVINGAPARTMENTS_AVG)
+## NONLIVINGAPARTMENTS_MEDI
+summary(HomeCredit_application_train_data_clean$NONLIVINGAPARTMENTS_MEDI)
+## NONLIVINGAPARTMENTS_MODE
+summary(HomeCredit_application_train_data_clean$NONLIVINGAPARTMENTS_MODE)
+## NONLIVINGAREA_AVG
+summary(HomeCredit_application_train_data_clean$NONLIVINGAREA_AVG)
+## NONLIVINGAREA_MEDI
+summary(HomeCredit_application_train_data_clean$NONLIVINGAREA_MEDI)
+## NONLIVINGAREA_MODE
+summary(HomeCredit_application_train_data_clean$NONLIVINGAREA_MODE)
+## TOTALAREA_MODE
+summary(HomeCredit_application_train_data_clean$TOTALAREA_MODE)
+## YEARS_BEGINEXPLUATATION_AVG
+summary(HomeCredit_application_train_data_clean$YEARS_BEGINEXPLUATATION_AVG)
+## YEARS_BEGINEXPLUATATION_MEDI
+summary(HomeCredit_application_train_data_clean$YEARS_BEGINEXPLUATATION_MEDI)
+## YEARS_BEGINEXPLUATATION_MODE
+summary(HomeCredit_application_train_data_clean$YEARS_BEGINEXPLUATATION_MODE)
+## YEARS_BUILD_AVG
+summary(HomeCredit_application_train_data_clean$YEARS_BUILD_AVG)
+## YEARS_BUILD_MEDI
+summary(HomeCredit_application_train_data_clean$YEARS_BUILD_MEDI)
+## YEARS_BUILD_MODE
+summary(HomeCredit_application_train_data_clean$YEARS_BUILD_MODE)
+
+```
+
+Since each of the variable's distributions include 0, we will impute missing values for each variable using the median.
+
+```{r}
+# Imputing missing values in AMT_ANNUITY using the Median
+HomeCredit_application_train_data_clean <- 
+  HomeCredit_application_train_data_clean %>%
+  mutate(across(
+    c(APARTMENTS_AVG, 
+      APARTMENTS_MEDI, 
+      APARTMENTS_MODE, 
+      BASEMENTAREA_AVG, 
+      BASEMENTAREA_MEDI, 
+      BASEMENTAREA_MODE, 
+      COMMONAREA_AVG, 
+      COMMONAREA_MEDI, 
+      COMMONAREA_MODE, 
+      ELEVATORS_AVG, 
+      ELEVATORS_MEDI, 
+      ELEVATORS_MODE, 
+      ENTRANCES_AVG, 
+      ENTRANCES_MEDI, 
+      ENTRANCES_MODE, 
+      FLOORSMAX_AVG, 
+      FLOORSMAX_MEDI, 
+      FLOORSMAX_MODE, 
+      FLOORSMIN_AVG, 
+      FLOORSMIN_MEDI, 
+      FLOORSMIN_MODE, 
+      LANDAREA_AVG, 
+      LANDAREA_MEDI, 
+      LANDAREA_MODE, 
+      LIVINGAPARTMENTS_AVG, 
+      LIVINGAPARTMENTS_MEDI, 
+      LIVINGAPARTMENTS_MODE, 
+      LIVINGAREA_AVG, 
+      LIVINGAREA_MEDI, 
+      LIVINGAREA_MODE, 
+      NONLIVINGAPARTMENTS_AVG, 
+      NONLIVINGAPARTMENTS_MEDI, 
+      NONLIVINGAPARTMENTS_MODE, 
+      NONLIVINGAREA_AVG, 
+      NONLIVINGAREA_MEDI, 
+      NONLIVINGAREA_MODE, 
+      TOTALAREA_MODE, 
+      YEARS_BEGINEXPLUATATION_AVG, 
+      YEARS_BEGINEXPLUATATION_MEDI, 
+      YEARS_BEGINEXPLUATATION_MODE, 
+      YEARS_BUILD_AVG, 
+      YEARS_BUILD_MEDI, 
+      YEARS_BUILD_MODE),
+    ~ if_else(is.na(.), median(., na.rm = TRUE), .)
+  ))
+```
+
+**How many observation of client's social surroundings**
+
+Observable
+
+  -   OBS_30_CNT_SOCIAL_CIRCLE: How many observation of client's social surroundings with observable 30 DPD (days past due) default
+  -   OBS_60_CNT_SOCIAL_CIRCLE: How many observation of client's social surroundings with observable 60 DPD (days past due) default
+
+Defaulted
+
+  -   DEF_30_CNT_SOCIAL_CIRCLE: How many observation of client's social surroundings defaulted on 30 DPD (days past due) 
+  -   DEF_60_CNT_SOCIAL_CIRCLE: How many observation of client's social surroundings defaulted on 60 (days past due) DPD
+  
+```{r}
+# Viewing the distribution of the variables
+## OBS_30_CNT_SOCIAL_CIRCLE
+summary(HomeCredit_application_train_data_clean$OBS_30_CNT_SOCIAL_CIRCLE)
+## OBS_60_CNT_SOCIAL_CIRCLE
+summary(HomeCredit_application_train_data_clean$OBS_60_CNT_SOCIAL_CIRCLE)
+## DEF_30_CNT_SOCIAL_CIRCLE
+summary(HomeCredit_application_train_data_clean$DEF_30_CNT_SOCIAL_CIRCLE)
+## DEF_60_CNT_SOCIAL_CIRCLE
+summary(HomeCredit_application_train_data_clean$DEF_60_CNT_SOCIAL_CIRCLE)
+```
+
+Assumptions & Approach:
+
+  -   Assuming the missing values do not indicate additional information
+  -   Impute missing values using the median due to skewness
+  
+```{r}
+# Imputing missing values in AMT_ANNUITY using the Median
+HomeCredit_application_train_data_clean <- 
+  HomeCredit_application_train_data_clean %>%
+  mutate(across(
+    c(OBS_30_CNT_SOCIAL_CIRCLE,
+      OBS_60_CNT_SOCIAL_CIRCLE,
+      DEF_30_CNT_SOCIAL_CIRCLE,
+      DEF_60_CNT_SOCIAL_CIRCLE),
+    ~ if_else(is.na(.), median(., na.rm = TRUE), .)
+  ))
+```
+
+**DAYS_LAST_PHONE_CHANGE**
+
+DAYS_LAST_PHONE_CHANGE is how many days before application did client change phones.
+
+```{r}
+# Viewing the distribution of DAYS_LAST_PHONE_CHANGE
+summary(HomeCredit_application_train_data_clean$DAYS_LAST_PHONE_CHANGE)
+ggplot(HomeCredit_application_train_data_clean,
+       aes(x = DAYS_LAST_PHONE_CHANGE)) +
+  geom_histogram(color = "black") +
+  labs(title = "Distribution of DAYS_LAST_PHONE_CHANGE", 
+       x = "DAYS_LAST_PHONE_CHANGE", 
+       y = "Count") +
+  theme_minimal()
+```
+
+Assumptions & Approach:
+
+  -   Assuming the missing values do not indicate additional information
+  -   Impute missing values using the median due to skewness
+
+```{r}
+# Imputing missing values in DAYS_LAST_PHONE_CHANGE using the Median
+HomeCredit_application_train_data_clean <- 
+  HomeCredit_application_train_data_clean %>%
+  mutate(DAYS_LAST_PHONE_CHANGE = if_else(is.na(DAYS_LAST_PHONE_CHANGE), 
+                               median(DAYS_LAST_PHONE_CHANGE, na.rm = TRUE), 
+                               DAYS_LAST_PHONE_CHANGE))
+
+# Viewing the distribution of of DAYS_LAST_PHONE_CHANGE after imputing
+summary(HomeCredit_application_train_data_clean$DAYS_LAST_PHONE_CHANGE)
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(x = DAYS_LAST_PHONE_CHANGE)) +
+  geom_histogram(color = "black") +
+  labs(title = "Distribution of Imputed DAYS_LAST_PHONE_CHANGE", 
+       x = "DAYS_LAST_PHONE_CHANGE", 
+       y = "Count") +
+  theme_minimal()
+```
+
+The distribution of DAYS_LAST_PHONE_CHANGE after imputing looks very similar to the variable's distribution prior to imputing.
+
+**Number of inquiries to Credit Bureau about the client before application**
+
+  -   AMT_REQ_CREDIT_BUREAU_HOUR: Number of inquiries to Credit Bureau about the client one hour before application
+  -   AMT_REQ_CREDIT_BUREAU_DAY: Number of inquiries to Credit Bureau about the client one day before application (excluding one hour before application)
+  -   AMT_REQ_CREDIT_BUREAU_WEEK: Number of inquiries to Credit Bureau about the client one week before application (excluding one day before application)
+  -   AMT_REQ_CREDIT_BUREAU_MON: Number of inquiries to Credit Bureau about the client one month before application (excluding one week before application)
+  -   AMT_REQ_CREDIT_BUREAU_QRT: Number of inquiries to Credit Bureau about the client 3 month before application (excluding one month before application)
+  -   AMT_REQ_CREDIT_BUREAU_YEAR: Number of inquiries to Credit Bureau about the client one day year (excluding last 3 months before application)
+  
+```{r}
+# Viewing the distribution of the variables
+## AMT_REQ_CREDIT_BUREAU_HOUR
+summary(HomeCredit_application_train_data_clean$AMT_REQ_CREDIT_BUREAU_HOUR)
+## AMT_REQ_CREDIT_BUREAU_DAY
+summary(HomeCredit_application_train_data_clean$AMT_REQ_CREDIT_BUREAU_DAY)
+## AMT_REQ_CREDIT_BUREAU_WEEK
+summary(HomeCredit_application_train_data_clean$AMT_REQ_CREDIT_BUREAU_WEEK)
+## AMT_REQ_CREDIT_BUREAU_MON
+summary(HomeCredit_application_train_data_clean$AMT_REQ_CREDIT_BUREAU_MON)
+## AMT_REQ_CREDIT_BUREAU_QRT
+summary(HomeCredit_application_train_data_clean$AMT_REQ_CREDIT_BUREAU_QRT)
+## AMT_REQ_CREDIT_BUREAU_YEAR
+summary(HomeCredit_application_train_data_clean$AMT_REQ_CREDIT_BUREAU_YEAR)
+```
+
+Assumptions & Approach:
+
+  -   Assuming the missing values do not indicate additional information
+  -   Impute missing values using the median due to skewness
+
+```{r}
+# Imputing missing values in AMT_ANNUITY using the Median
+HomeCredit_application_train_data_clean <- 
+  HomeCredit_application_train_data_clean %>%
+  mutate(across(
+    c(AMT_REQ_CREDIT_BUREAU_HOUR,
+      AMT_REQ_CREDIT_BUREAU_DAY,
+      AMT_REQ_CREDIT_BUREAU_WEEK,
+      AMT_REQ_CREDIT_BUREAU_MON,
+      AMT_REQ_CREDIT_BUREAU_QRT,
+      AMT_REQ_CREDIT_BUREAU_YEAR),
+    ~ if_else(is.na(.), median(., na.rm = TRUE), .)
+  ))
+```
+
+### Final Missing Data Evaluation
+
+```{r}
+# Identifying columns with missing data in the train data
+clean_missing_values <- HomeCredit_application_train_data_clean %>%
+  summarise(across(everything(), ~ sum(is.na(.)))) %>%
+  pivot_longer(everything(), 
+               names_to = "column", 
+               values_to = "missing_count") %>%
+  filter(missing_count > 0) %>%
+  arrange(desc(missing_count))
+
+clean_missing_values
+```
+
+All missing values have been adjusted for through various customized solutions. 
+
+## Near Zero Variance
+
+The goal of this section is to detect variables that have very little variation or are mostly constant, which are often uninformative in predictive modeling sometimes leading to over fitting or instability.
+
+```{r}
+# Identifying variables with near-zero or zero variance
+nzv_vars <- nearZeroVar(HomeCredit_application_train_data_clean, 
+                        saveMetrics = TRUE)
+
+# Identifying Column indices of near-zero variance variables
+nzv_cols <- nearZeroVar(HomeCredit_application_train_data_clean)
+
+# Removing near-zero variance variables from the data set
+HomeCredit_application_train_data_clean <- 
+  HomeCredit_application_train_data_clean[, -nzv_cols]
+```
+
+50 near zero variance variables were detected and removed from the data set. 
+
+## Predictor-Target Relationships
+  
+The goal of this section is to explore the relationship between target and predictors, looking for potentially strong predictors that could be included later in a model.
+
+### Categorical variables
+
+How many categorical predictor variables are there?
+
+```{r}
+# Identifying remaining categorical variables
+colnames(select_if(HomeCredit_application_train_data_clean, is.character))
+
+# Converting character categorical variables to factor variables
+HomeCredit_application_train_data_clean <- 
+  HomeCredit_application_train_data_clean %>%
+  mutate(across(c(NAME_CONTRACT_TYPE, 
+                  CODE_GENDER, 
+                  FLAG_OWN_CAR, 
+                  FLAG_OWN_REALTY, 
+                  AMT_GOODS_PRICE, 
+                  NAME_TYPE_SUITE, 
+                  NAME_INCOME_TYPE, 
+                  NAME_EDUCATION_TYPE, 
+                  NAME_FAMILY_STATUS, 
+                  NAME_HOUSING_TYPE, 
+                  OWN_CAR_AGE, 
+                  OCCUPATION_TYPE, 
+                  WEEKDAY_APPR_PROCESS_START, 
+                  ORGANIZATION_TYPE, 
+                  EXT_SOURCE_1, 
+                  EXT_SOURCE_2, 
+                  EXT_SOURCE_3, 
+                  FONDKAPREMONT_MODE, 
+                  HOUSETYPE_MODE, 
+                  WALLSMATERIAL_MODE, 
+                  EMERGENCYSTATE_MODE), 
+                as.factor))
+
+# Converting additional variables to factor variables
+HomeCredit_application_train_data_clean <- 
+  HomeCredit_application_train_data_clean %>%
+  mutate(across(c(FLAG_EMP_PHONE,
+                  FLAG_WORK_PHONE,
+                  FLAG_PHONE,
+                  FLAG_EMAIL,
+                  FLAG_DOCUMENT_3,
+                  FLAG_DOCUMENT_6,
+                  FLAG_DOCUMENT_8,
+                  REGION_RATING_CLIENT,
+                  REGION_RATING_CLIENT_W_CITY,
+                  HOUR_APPR_PROCESS_START,
+                  REG_REGION_NOT_WORK_REGION,
+                  REG_CITY_NOT_LIVE_CITY,
+                  REG_CITY_NOT_WORK_CITY,
+                  LIVE_CITY_NOT_WORK_CITY), 
+                as.factor))
+
+# Identifying factor variables
+colnames(select_if(HomeCredit_application_train_data_clean, is.factor ))
+```
+**NAME_CONTRACT_TYPE**
+
+NAME_CONTRACT_TYPE: Identification if loan is cash or revolving
+
+```{r}
+# NAME_CONTRACT_TYPE barplot
+HomeCredit_application_train_data_clean %>% ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(NAME_CONTRACT_TYPE)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of NAME_CONTRACT_TYPE by TARGET") +
+  coord_flip()
+
+# NAME_CONTRACT_TYPE proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, NAME_CONTRACT_TYPE) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most NAME_CONTRACT_TYPEs are Cash Loans. This group is also more likely to default (8%) compared to revolving loans (5%).
+
+**CODE_GENDER**
+
+CODE_GENDER: Gender of the client
+
+```{r}
+# CODE_GENDER barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(CODE_GENDER)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of CODE_GENDER by TARGET") +
+  coord_flip()
+
+# CODE_GENDER proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, CODE_GENDER) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+There aer more female than male observations in the dataset, but default rate for males (10%) is slightly higher than that for females (7%).
+
+**FLAG_OWN_CAR**
+
+FLAG_OWN_CAR: Flag if the client owns a car
+
+```{r}
+# FLAG_OWN_CAR barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(FLAG_OWN_CAR)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of FLAG_OWN_CAR by TARGET") +
+  coord_flip()
+
+# FLAG_OWN_CAR proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, FLAG_OWN_CAR) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+More clients don't own cars than do, but the default rate seems to be higher for those who do not own a car (9%) than for those that do (7%). 
+
+**FLAG_OWN_REALTY**
+
+FLAG_OWN_REALTY: Flag if client owns a house or flat
+
+```{r}
+# FLAG_OWN_REALTY barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(FLAG_OWN_REALTY)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of FLAG_OWN_REALTY by TARGET") +
+  coord_flip()
+
+# FLAG_OWN_REALTY proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, FLAG_OWN_REALTY) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+More clients in the data set own a house or flat than done, but there is no difference in default rate between the two groups.
+
+**AMT_GOODS_PRICE**
+
+AMT_GOODS_PRICE: For consumer loans it is the price of the goods for which the loan is given
+
+```{r}
+# AMT_GOODS_PRICE barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(AMT_GOODS_PRICE)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of AMT_GOODS_PRICE by TARGET") +
+  coord_flip()
+
+# AMT_GOODS_PRICE proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, AMT_GOODS_PRICE) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Default rates seem to be highest among those with a medium AMT_GOODS_PRICE, but it's pretty equal across groups.
+
+**NAME_TYPE_SUITE**
+
+NAME_TYPE_SUITE: Who was accompanying client when he was applying for the loan
+
+```{r}
+# NAME_TYPE_SUITE barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(NAME_TYPE_SUITE)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of NAME_TYPE_SUITE by TARGET") +
+  coord_flip()
+
+# NAME_TYPE_SUITE proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, NAME_TYPE_SUITE) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients in the data set were unaccompanied when applying for the loan, and the default rate is not highest in this group.
+
+**NAME_INCOME_TYPE**
+
+NAME_INCOME_TYPE: Clients income type (businessman, working, maternity leave,…)
+
+```{r}
+# NAME_INCOME_TYPE barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(NAME_INCOME_TYPE)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of NAME_INCOME_TYPE by TARGET") +
+  coord_flip()
+
+# NAME_INCOME_TYPE proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, NAME_INCOME_TYPE) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients in the data set have a NAME_INCOME_TYPE of "Working", but this group did not have the highest default rate. Clients with a NAME_INCOME_TYPE of "Maternity leave" defaulted 40% of the time and those with a NAME_INCOME_TYPE of "Unemployed" defaulted 36% of the time.
+
+**NAME_EDUCATION_TYPE**
+
+NAME_EDUCATION_TYPE: Level of highest education the client achieved
+
+```{r}
+# NAME_EDUCATION_TYPE barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(NAME_EDUCATION_TYPE)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of NAME_EDUCATION_TYPE by TARGET") +
+  coord_flip()
+
+# NAME_EDUCATION_TYPE proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, NAME_EDUCATION_TYPE) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients in the data set have a NAME_EDUCATION_TYPE of "Secondary/ secondary special", but the group with "Lower secondary" defaulted the most often at 11%.
+
+**NAME_FAMILY_STATUS**
+
+NAME_FAMILY_STATUS: Family status of the client
+
+```{r}
+# NAME_FAMILY_STATUS barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(NAME_FAMILY_STATUS)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of NAME_FAMILY_STATUS by TARGET") +
+  coord_flip()
+
+# NAME_FAMILY_STATUS proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, NAME_FAMILY_STATUS) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients in the data set have a NAME_FAMILY_STATUS of "Married". The "Married" and "Civil Marriage" groups had the highest default rates at 10%.
+
+**NAME_HOUSING_TYPE**
+
+NAME_HOUSING_TYPE: What is the housing situation of the client (renting, living with parents, ...)
+
+```{r}
+# NAME_HOUSING_TYPE barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(NAME_HOUSING_TYPE)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of NAME_HOUSING_TYPE by TARGET") +
+  coord_flip()
+
+# NAME_HOUSING_TYPE proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, NAME_HOUSING_TYPE) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients in the data set have a NAME_HOUSING_TYPE of "House/ apartment", but the "Rented apartment" and "With parents" groups had the highest default rate at 12% each.
+
+**OWN_CAR_AGE**
+
+OWN_CAR_AGE: Age of client's car
+
+```{r}
+# OWN_CAR_AGE barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(OWN_CAR_AGE)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of OWN_CAR_AGE by TARGET") +
+  coord_flip()
+
+# OWN_CAR_AGE proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, OWN_CAR_AGE) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients in the data set did not report an OWN_CAR_AGE. The "high" and "not reported" groups had the highest default rates at 9%.
+
+**FLAG_EMP_PHONE**
+
+FLAG_EMP_PHONE: Did client provide work phone (1=YES, 0=NO)
+
+```{r}
+# FLAG_EMP_PHONE barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(FLAG_EMP_PHONE)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of FLAG_EMP_PHONE by TARGET") +
+  coord_flip()
+
+# FLAG_EMP_PHONE proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, FLAG_EMP_PHONE) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients in the data set provided a work phone number, this group also has the highest default rate at 9%.
+
+**FLAG_WORK_PHONE**
+
+FLAG_WORK_PHONE: Did client provide home phone (1=YES, 0=NO)
+
+```{r}
+# FLAG_WORK_PHONE barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(FLAG_WORK_PHONE)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of FLAG_WORK_PHONE by TARGET") +
+  coord_flip()
+
+# FLAG_WORK_PHONE proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, FLAG_WORK_PHONE) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients in the data set provided a work phone number, this group also has the highest default rate at 10%.
+
+**FLAG_PHONE**
+
+FLAG_PHONE: Did client provide home phone (1=YES, 0=NO)
+
+```{r}
+# FLAG_PHONE barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(FLAG_PHONE)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of FLAG_PHONE by TARGET") +
+  coord_flip()
+
+# FLAG_PHONE proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, FLAG_PHONE) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients in the data set provided a home phone number, this group also has the highest default rate at 8%.
+
+**FLAG_EMAIL**
+
+FLAG_EMAIL: Did client provide email (1=YES, 0=NO)
+
+```{r}
+# FLAG_EMAIL barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(FLAG_EMAIL)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of FLAG_EMAIL by TARGET") +
+  coord_flip()
+
+# FLAG_EMAIL proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, FLAG_EMAIL) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients in the data set did not provide an email address, but both groups had an equal default rate of 8%.
+
+**OCCUPATION_TYPE**
+
+OCCUPATION_TYPE: What kind of occupation does the client have
+
+```{r}
+# OCCUPATION_TYPE barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(OCCUPATION_TYPE)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of OCCUPATION_TYPE by TARGET") +
+  coord_flip()
+
+# OCCUPATION_TYPE proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, OCCUPATION_TYPE) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+The highest default rate was among low-skill laborers.
+
+**REGION_RATING_CLIENT**
+
+REGION_RATING_CLIENT: Our rating of the region where client lives (1,2,3)
+
+```{r}
+# REGION_RATING_CLIENT barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(REGION_RATING_CLIENT)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of REGION_RATING_CLIENT by TARGET") +
+  coord_flip()
+
+# REGION_RATING_CLIENT proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, REGION_RATING_CLIENT) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Clients in the REGION_RATING_CLIENT = 2 group had the highest default rate at 11%.
+
+**REGION_RATING_CLIENT_W_CITY**
+
+REGION_RATING_CLIENT_W_CITY: Our rating of the region where client lives with taking city into account (1,2,3)
+
+```{r}
+# REGION_RATING_CLIENT_W_CITY barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(REGION_RATING_CLIENT_W_CITY)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of REGION_RATING_CLIENT_W_CITY by TARGET") +
+  coord_flip()
+
+# REGION_RATING_CLIENT_W_CITY proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, REGION_RATING_CLIENT_W_CITY) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Clients in the REGION_RATING_CLIENT_W_CITY = 2 group had the highest default rate at 11%.
+
+**WEEKDAY_APPR_PROCESS_START**
+
+WEEKDAY_APPR_PROCESS_START: On which day of the week did the client apply for the loan
+
+```{r}
+# WEEKDAY_APPR_PROCESS_START barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(WEEKDAY_APPR_PROCESS_START)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of WEEKDAY_APPR_PROCESS_START by TARGET") +
+  coord_flip()
+
+# WEEKDAY_APPR_PROCESS_START proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, WEEKDAY_APPR_PROCESS_START) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Default rate doesn't really vary among WEEKDAY_APPR_PROCESS_STARTs. 
+
+**HOUR_APPR_PROCESS_START**
+
+HOUR_APPR_PROCESS_START: Approximately at what hour did the client apply for the loan
+
+```{r}
+# HOUR_APPR_PROCESS_START barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(HOUR_APPR_PROCESS_START)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of HOUR_APPR_PROCESS_START by TARGET") +
+  coord_flip()
+
+# HOUR_APPR_PROCESS_START proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, HOUR_APPR_PROCESS_START) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Applications started in hour 0 had the highest default rate at 15%, but had the fewest applications started in that hour.
+
+**REG_REGION_NOT_WORK_REGION**
+
+REG_REGION_NOT_WORK_REGION: Flag if client's permanent address does not match work address (1=different, 0=same, at region level)
+
+```{r}
+# REG_REGION_NOT_WORK_REGION barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(REG_REGION_NOT_WORK_REGION)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of REG_REGION_NOT_WORK_REGION by TARGET") +
+  coord_flip()
+
+# REG_REGION_NOT_WORK_REGION proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, REG_REGION_NOT_WORK_REGION) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients in the data set had a permanent address match their work address at the region level, but the default rate was higher for those that didn't at 9%.
+
+**REG_CITY_NOT_LIVE_CITY**
+
+REG_CITY_NOT_LIVE_CITY: Flag if client's permanent address does not match contact address (1=different, 0=same, at city level)
+
+```{r}
+# REG_CITY_NOT_LIVE_CITY barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(REG_CITY_NOT_LIVE_CITY)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of REG_CITY_NOT_LIVE_CITY by TARGET") +
+  coord_flip()
+
+# REG_CITY_NOT_LIVE_CITY proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, REG_CITY_NOT_LIVE_CITY) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients in the data set had their permanent address match their contact address at the city level, but those who didn't had a higher default rate at 12%.
+
+**REG_CITY_NOT_WORK_CITY**
+
+REG_CITY_NOT_WORK_CITY: Flag if client's permanent address does not match work address (1=different, 0=same, at city level)
+
+```{r}
+# REG_CITY_NOT_WORK_CITY barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(REG_CITY_NOT_WORK_CITY)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of REG_CITY_NOT_WORK_CITY by TARGET") +
+  coord_flip()
+
+# REG_CITY_NOT_WORK_CITY proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, REG_CITY_NOT_WORK_CITY) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients in the data set had thier permanent address match thier work address at the city level, but those who didn't had a higher default rate at 11%.
+
+**LIVE_CITY_NOT_WORK_CITY**
+
+LIVE_CITY_NOT_WORK_CITY: Flag if client's contact address does not match work address (1=different, 0=same, at city level)
+
+```{r}
+# LIVE_CITY_NOT_WORK_CITY barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(LIVE_CITY_NOT_WORK_CITY)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of LIVE_CITY_NOT_WORK_CITY by TARGET") +
+  coord_flip()
+
+# LIVE_CITY_NOT_WORK_CITY proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, LIVE_CITY_NOT_WORK_CITY) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients in the data set had their contact address match thier work address at the city level, but those who didn't had a higher default rate at 6%.
+
+**ORGANIZATION_TYPE**
+
+ORGANIZATION_TYPE: Type of organization where client works
+
+```{r}
+# ORGANIZATION_TYPE barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(ORGANIZATION_TYPE)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of ORGANIZATION_TYPE by TARGET") +
+  coord_flip()
+
+# ORGANIZATION_TYPE proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, ORGANIZATION_TYPE) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients work for a "Business Entity Type 3", but those working for "Transport: type 3" had the highest default rate at 16%.
+
+**EXT_SOURCE_1**
+
+EXT_SOURCE_1: Normalized score from external data source
+
+```{r}
+# EXT_SOURCE_1 barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(EXT_SOURCE_1)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of EXT_SOURCE_1 by TARGET") +
+  coord_flip()
+
+# EXT_SOURCE_1 proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, EXT_SOURCE_1) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients did not have a normalized score from external data source 1, but those with a "low" normalized score had the highest default rate at 15%.
+
+**EXT_SOURCE_2**
+
+EXT_SOURCE_2: Normalized score from external data source
+
+```{r}
+# EXT_SOURCE_2 barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(EXT_SOURCE_2)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of EXT_SOURCE_2 by TARGET") +
+  coord_flip()
+
+# EXT_SOURCE_2 proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, EXT_SOURCE_2) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Clients with a "low" normalized score had the highest default rate at 15%.
+
+**EXT_SOURCE_3**
+
+EXT_SOURCE_3: Normalized score from external data source
+
+```{r}
+# EXT_SOURCE_3 barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(EXT_SOURCE_3)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of EXT_SOURCE_3 by TARGET") +
+  coord_flip()
+
+# EXT_SOURCE_3 proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, EXT_SOURCE_3) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients did not have a normalized score from external data source 3, but those with a "low" normalized score had the highest default rate at 16%.
+
+**FONDKAPREMONT_MODE**
+
+FONDKAPREMONT_MODE: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# FONDKAPREMONT_MODE barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(FONDKAPREMONT_MODE)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of FONDKAPREMONT_MODE by TARGET") +
+  coord_flip()
+
+# FONDKAPREMONT_MODE proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, FONDKAPREMONT_MODE) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients had a blank entry for FONDKAPREMONT_MODE, this was also the group with the highest default rate of 9%.
+
+**HOUSETYPE_MODE**
+
+HOUSETYPE_MODE: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# HOUSETYPE_MODE barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(HOUSETYPE_MODE)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of HOUSETYPE_MODE by TARGET") +
+  coord_flip()
+
+# HOUSETYPE_MODE proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, HOUSETYPE_MODE) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients had a blank entry for HOUSETYPE_MODE, but the "specific housing" group had the highest default rate of 10%.
+
+**WALLSMATERIAL_MODE**
+
+WALLSMATERIAL_MODE: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# WALLSMATERIAL_MODE barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(WALLSMATERIAL_MODE)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of WALLSMATERIAL_MODE by TARGET") +
+  coord_flip()
+
+# WALLSMATERIAL_MODE proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, WALLSMATERIAL_MODE) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients had a blank entry for WALLSMATERIAL_MODE, but the "Wooden" group had the highest default rate of 10%.
+
+**EMERGENCYSTATE_MODE**
+
+EMERGENCYSTATE_MODE: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# EMERGENCYSTATE_MODE barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(EMERGENCYSTATE_MODE)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of EMERGENCYSTATE_MODE by TARGET") +
+  coord_flip()
+
+# EMERGENCYSTATE_MODE proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, EMERGENCYSTATE_MODE) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients had "No" for EMERGENCYSTATE_MODE, but the "Yes" group had the highest default rate of 10%.
+
+**FLAG_DOCUMENT_3**
+
+FLAG_DOCUMENT_3: Did client provide document 3
+
+```{r}
+# FLAG_DOCUMENT_3 barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(FLAG_DOCUMENT_3)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of FLAG_DOCUMENT_3 by TARGET") +
+  coord_flip()
+
+# FLAG_DOCUMENT_3 proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, FLAG_DOCUMENT_3) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients provided document 3. This group also had the highest default rate of 9%.
+
+**FLAG_DOCUMENT_6**
+
+FLAG_DOCUMENT_6: Did client provide document 6
+
+```{r}
+# FLAG_DOCUMENT_6 barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(FLAG_DOCUMENT_6)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of FLAG_DOCUMENT_6 by TARGET") +
+  coord_flip()
+
+# FLAG_DOCUMENT_6 proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, FLAG_DOCUMENT_6) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+
+Most clients did not provide document 6. This group also had the highest default rate of 8%.
+
+**FLAG_DOCUMENT_8**
+
+FLAG_DOCUMENT_8: Did client provide document 8
+
+```{r}
+# FLAG_DOCUMENT_8 barplot
+HomeCredit_application_train_data_clean %>% 
+  ggplot() +
+  geom_bar(aes(x = fct_rev(fct_infreq(FLAG_DOCUMENT_8)), 
+               fill = as.factor(TARGET))) +
+  ggtitle("Barplot of FLAG_DOCUMENT_8 by TARGET") +
+  coord_flip()
+
+# FLAG_DOCUMENT_8 proportion table
+kable(t(HomeCredit_application_train_data_clean %>% 
+            select(TARGET, FLAG_DOCUMENT_8) %>% 
+            table() %>% 
+            prop.table(margin = 2) %>%
+            round(2)), format = "markdown")
+```
+Most clients did not provide document 8.This group also had the highest default rate of 8%.
+
+### Numeric variables
+
+How many numeric predictor variables are there?
+
+```{r}
+# Identifying remaining numeric variables
+colnames(select_if(HomeCredit_application_train_data_clean, is.numeric))
+```
+
+**CNT_CHILDREN**
+
+CNT_CHILDREN: Number of children the client has
+
+```{r}
+# Boxplot of CNT_CHILDREN by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), CNT_CHILDREN)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of CNT_CHILDREN by TARGET") +
+  labs(x = "TARGET")
+```
+
+CNT_CHILDREN does not seem to differ for the levels of TARGET.
+
+**AMT_INCOME_TOTAL**
+
+AMT_INCOME_TOTAL: Income of the client
+
+```{r}
+# Boxplot of AMT_INCOME_TOTAL by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), 
+           AMT_INCOME_TOTAL)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of AMT_INCOME_TOTAL by TARGET") +
+  labs(x = "TARGET")
+```
+
+There seems to be a crazy outlier in the TARGET = 1. Let's remove that and re-look at the distribution of AMT_INCOME_TOTAL.
+
+```{r}
+HomeCredit_application_train_data_clean <- 
+  HomeCredit_application_train_data_clean %>%
+  filter(AMT_INCOME_TOTAL < 30000000)
+
+# Boxplot of AMT_INCOME_TOTAL by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), AMT_INCOME_TOTAL)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of AMT_INCOME_TOTAL by TARGET") +
+  labs(x = "TARGET")
+```
+
+The boxplots are still too collapsed to evaluate the relationship. Let's temporarily filter some more.
+
+```{r}
+HomeCredit_application_train_data_clean_test <- 
+  HomeCredit_application_train_data_clean %>%
+  filter(AMT_INCOME_TOTAL < 500000)
+
+# Boxplot of AMT_INCOME_TOTAL by TARGET
+ggplot(HomeCredit_application_train_data_clean_test, aes(as.character(TARGET), AMT_INCOME_TOTAL)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of AMT_INCOME_TOTAL by TARGET") +
+  labs(x = "TARGET")
+```
+
+AMT_INCOME_TOTAL tends to be slightly higher for those who did not default, on average, for those with an AMT_INCOME_TOTAL less than 500,000, but there is still substantial overlap in the variables across the TARGET variable.
+
+**AMT_CREDIT**
+
+AMT_CREDIT: Credit amount of the loan
+
+```{r}
+# Boxplot of AMT_CREDIT by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), AMT_CREDIT)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of AMT_CREDIT by TARGET") +
+  labs(x = "TARGET")
+```
+
+AMT_CREDIT does not seem to differ for the levels of TARGET.
+
+**AMT_ANNUITY**
+
+AMT_ANNUITY: Loan annuity
+
+```{r}
+# Boxplot of AMT_ANNUITY by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), AMT_ANNUITY)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of AMT_ANNUITY by TARGET") +
+  labs(x = "TARGET")
+```
+
+AMT_ANNUITY does not seem to differ for the levels of TARGET.
+
+**REGION_POPULATION_RELATIVE**
+
+REGION_POPULATION_RELATIVE: Normalized population of region where client lives (higher number means the client lives in more populated region)
+
+```{r}
+# Boxplot of REGION_POPULATION_RELATIVE by TARGET
+ggplot(HomeCredit_application_train_data_clean, aes(as.character(TARGET), REGION_POPULATION_RELATIVE)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of REGION_POPULATION_RELATIVE by TARGET") +
+  labs(x = "TARGET")
+```
+
+REGION_POPULATION_RELATIVE does not seem to differ for the levels of TARGET.
+
+**DAYS_BIRTH**
+
+DAYS_BIRTH: Client's age in days at the time of application
+
+```{r}
+# Boxplot of DAYS_BIRTH by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), DAYS_BIRTH)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of DAYS_BIRTH by TARGET") +
+  labs(x = "TARGET")
+```
+
+DAYS_BIRTH tends to be less negative for clients who defaulted, on average. This means that, on average, younger clients tend to default more than older clients. 
+
+**DAYS_REGISTRATION**
+
+DAYS_REGISTRATION: How many days before the application did client change his registration
+
+```{r}
+# Boxplot of DAYS_REGISTRATION by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), DAYS_REGISTRATION)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of DAYS_REGISTRATION by TARGET") +
+  labs(x = "TARGET")
+```
+
+DAYS_REGISTRATION tends to be less negative for clients who defaulted, on average. This means that, on average, clients who changed their registration more recently are more likely to default. 
+
+**DAYS_ID_PUBLISH**
+
+DAYS_ID_PUBLISH: How many days before the application did client change the identity document with which he applied for the loan
+
+```{r}
+# Boxplot of DAYS_ID_PUBLISH by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), DAYS_ID_PUBLISH)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of DAYS_ID_PUBLISH by TARGET") +
+  labs(x = "TARGET")
+```
+
+DAYS_ID_PUBLISH tends to be less negative for clients who defaulted, on average. This means that, on average, clients who changed their identity document with which they applied for the loan more recently are more likely to default. 
+
+**CNT_FAM_MEMBERS**
+
+CNT_FAM_MEMBERS: How many family members does client have
+
+```{r}
+# Boxplot of CNT_FAM_MEMBERS by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), CNT_FAM_MEMBERS)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of CNT_FAM_MEMBERS by TARGET") +
+  labs(x = "TARGET")
+```
+
+The relationship between CNT_FAM_MEMBERS and TARGET is unclear since there is so much overlap in the two distributions. 
+
+**BASEMENTAREA_AVG**
+
+BASEMENTAREA_AVG: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# Boxplot of BASEMENTAREA_AVG by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), BASEMENTAREA_AVG)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of BASEMENTAREA_AVG by TARGET") +
+  labs(x = "TARGET")
+```
+
+BASEMENTAREA_AVG does not seem to differ for the levels of TARGET.
+
+**ENTRANCES_AVG**
+
+ENTRANCES_AVG: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# Boxplot of ENTRANCES_AVG by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), ENTRANCES_AVG)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of ENTRANCES_AVG by TARGET") +
+  labs(x = "TARGET")
+```
+
+ENTRANCES_AVG does not seem to differ for the levels of TARGET.
+
+**FLOORSMAX_AVG**
+
+FLOORSMAX_AVG: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# Boxplot of FLOORSMAX_AVG by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), FLOORSMAX_AVG)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of FLOORSMAX_AVG by TARGET") +
+  labs(x = "TARGET")
+```
+
+FLOORSMAX_AVG does not seem to differ for the levels of TARGET.
+
+**FLOORSMIN_AVG**
+
+FLOORSMIN_AVG: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# Boxplot of FLOORSMIN_AVG by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), FLOORSMIN_AVG)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of FLOORSMIN_AVG by TARGET") +
+  labs(x = "TARGET")
+```
+
+FLOORSMIN_AVG does not seem to differ for the levels of TARGET.
+
+**LANDAREA_AVG**
+
+LANDAREA_AVG: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# Boxplot of LANDAREA_AVG by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), LANDAREA_AVG)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of LANDAREA_AVG by TARGET")
+```
+
+LANDAREA_AVG does not seem to differ for the levels of TARGET.
+
+**NONLIVINGAREA_AVG**
+
+NONLIVINGAREA_AVG: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# Boxplot of NONLIVINGAREA_AVG by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), NONLIVINGAREA_AVG)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of NONLIVINGAREA_AVG by TARGET") +
+  labs(x = "TARGET")
+```
+
+NONLIVINGAREA_AVG does not seem to differ for the levels of TARGET.
+
+**ENTRANCES_MODE**
+
+ENTRANCES_MODE: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# Boxplot of ENTRANCES_MODE by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), ENTRANCES_MODE)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of ENTRANCES_MODE by TARGET")
+```
+
+ENTRANCES_MODE does not seem to differ for the levels of TARGET.
+
+**FLOORSMAX_MODE**
+
+FLOORSMAX_MODE: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# Boxplot of FLOORSMAX_MODE by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), FLOORSMAX_MODE)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of FLOORSMAX_MODE by TARGET")
+```
+
+FLOORSMAX_MODE does not seem to differ for the levels of TARGET.
+
+**FLOORSMIN_MODE**
+
+FLOORSMIN_MODE: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# Boxplot of FLOORSMIN_MODE by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), FLOORSMIN_MODE)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of FLOORSMIN_MODE by TARGET")
+```
+FLOORSMIN_MODE does not seem to differ for the levels of TARGET.
+
+**LANDAREA_MODE**
+
+LANDAREA_MODE: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# Boxplot of LANDAREA_MODE by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), LANDAREA_MODE)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of LANDAREA_MODE by TARGET")
+```
+LANDAREA_MODE does not seem to differ for the levels of TARGET.
+
+**NONLIVINGAREA_MODE**
+
+NONLIVINGAREA_MODE: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# Boxplot of NONLIVINGAREA_MODE by TARGET
+ggplot(HomeCredit_application_train_data_clean, aes(as.character(TARGET), NONLIVINGAREA_MODE)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of NONLIVINGAREA_MODE by TARGET")
+```
+NONLIVINGAREA_MODE does not seem to differ for the levels of TARGET.
+
+**BASEMENTAREA_MODE**
+
+BASEMENTAREA_MODE: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# Boxplot of BASEMENTAREA_MODE by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), BASEMENTAREA_MODE)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of BASEMENTAREA_MODE by TARGET")
+```
+
+BASEMENTAREA_MODE does not seem to differ for the levels of TARGET.
+
+**FLOORSMAX_MEDI**
+
+FLOORSMAX_MEDI: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# Boxplot of FLOORSMAX_MEDI by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), FLOORSMAX_MEDI)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of FLOORSMAX_MEDI by TARGET")
+```
+FLOORSMAX_MEDI does not seem to differ for the levels of TARGET.
+
+**FLOORSMIN_MEDI**
+
+FLOORSMIN_MEDI: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# Boxplot of FLOORSMIN_MEDI by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), FLOORSMIN_MEDI)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of FLOORSMIN_MEDI by TARGET")
+```
+FLOORSMIN_MEDI does not seem to differ for the levels of TARGET.
+
+**ENTRANCES_MEDI**
+
+ENTRANCES_MEDI: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# Boxplot of ENTRANCES_MEDI by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), ENTRANCES_MEDI)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of ENTRANCES_MEDI by TARGET")
+```
+
+ENTRANCES_MEDI does not seem to differ for the levels of TARGET.
+
+**LANDAREA_MEDI**
+
+LANDAREA_MEDI: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# Boxplot of LANDAREA_MEDI by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), LANDAREA_MEDI)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of LANDAREA_MEDI by TARGET")
+```
+
+LANDAREA_MEDI does not seem to differ for the levels of TARGET.
+
+**NONLIVINGAREA_MEDI**
+
+NONLIVINGAREA_MEDI: Normalized information about building where the client lives, What is average (_AVG suffix), modus (_MODE suffix), median (_MEDI suffix) apartment size, common area, living area, age of building, number of elevators, number of entrances, state of the building, number of floor
+
+```{r}
+# Boxplot of NONLIVINGAREA_MEDI by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), NONLIVINGAREA_MEDI)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of NONLIVINGAREA_MEDI by TARGET")
+```
+
+NONLIVINGAREA_MEDI does not seem to differ for the levels of TARGET.
+
+**OBS_30_CNT_SOCIAL_CIRCLE**
+
+OBS_30_CNT_SOCIAL_CIRCLE: How many observation of client's social surroundings with observable 30 DPD (days past due) default
+
+```{r}
+# Boxplot of OBS_30_CNT_SOCIAL_CIRCLE by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), OBS_30_CNT_SOCIAL_CIRCLE)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of OBS_30_CNT_SOCIAL_CIRCLE by TARGET")
+```
+
+There seems to be an extreme outlier in the TARGET = 0 subgroup. 
+
+```{r}
+max(HomeCredit_application_train_data_clean$OBS_30_CNT_SOCIAL_CIRCLE)
+```
+
+This seems a bit unreasonable. Let's exclude it from the data set and then view the distribution again.
+
+```{r}
+HomeCredit_application_train_data_clean <- 
+  HomeCredit_application_train_data_clean %>%
+  filter(OBS_30_CNT_SOCIAL_CIRCLE < 100)
+
+# Boxplot of OBS_30_CNT_SOCIAL_CIRCLE by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), OBS_30_CNT_SOCIAL_CIRCLE)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of OBS_30_CNT_SOCIAL_CIRCLE by TARGET") +
+  labs(x = "TARGET")
+```
+
+OBS_30_CNT_SOCIAL_CIRCLE does not seem to differ for the levels of TARGET.
+
+**DEF_30_CNT_SOCIAL_CIRCLE**
+
+DEF_30_CNT_SOCIAL_CIRCLE: How many observation of client's social surroundings defaulted on 30 DPD (days past due) 
+
+```{r}
+# Boxplot of DEF_30_CNT_SOCIAL_CIRCLE by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), DEF_30_CNT_SOCIAL_CIRCLE)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of DEF_30_CNT_SOCIAL_CIRCLE by TARGET")
+```
+
+DEF_30_CNT_SOCIAL_CIRCLE does not seem to differ for the levels of TARGET.
+
+**OBS_60_CNT_SOCIAL_CIRCLE**
+
+OBS_60_CNT_SOCIAL_CIRCLE: How many observation of client's social surroundings with observable 60 DPD (days past due) default
+
+```{r}
+# Boxplot of OBS_60_CNT_SOCIAL_CIRCLE by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), OBS_60_CNT_SOCIAL_CIRCLE)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of OBS_60_CNT_SOCIAL_CIRCLE by TARGET")
+```
+
+OBS_60_CNT_SOCIAL_CIRCLE does not seem to differ for the levels of TARGET.
+
+**DEF_60_CNT_SOCIAL_CIRCLE**
+
+DEF_60_CNT_SOCIAL_CIRCLE: How many observation of client's social surroundings defaulted on 60 (days past due) DPD
+
+```{r}
+# Boxplot of DEF_60_CNT_SOCIAL_CIRCLE by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), DEF_60_CNT_SOCIAL_CIRCLE)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of DEF_60_CNT_SOCIAL_CIRCLE by TARGET")
+```
+
+DEF_60_CNT_SOCIAL_CIRCLE does not seem to differ for the levels of TARGET.
+
+**DAYS_LAST_PHONE_CHANGE**
+
+DAYS_LAST_PHONE_CHANGE: How many days before application did client change phone
+
+```{r}
+# Boxplot of DAYS_LAST_PHONE_CHANGE by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), DAYS_LAST_PHONE_CHANGE)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of DAYS_LAST_PHONE_CHANGE by TARGET")
+```
+
+DAYS_LAST_PHONE_CHANGE tends to be less negative for clients who defaulted, on average. This means that, on average, clients who changed their phone more recently are more likely to default.
+
+**AMT_REQ_CREDIT_BUREAU_MON**
+
+AMT_REQ_CREDIT_BUREAU_MON: Number of inquiries to Credit Bureau about the client one month before application (excluding one week before application)
+
+```{r}
+# Boxplot of AMT_REQ_CREDIT_BUREAU_MON by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), AMT_REQ_CREDIT_BUREAU_MON)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of AMT_REQ_CREDIT_BUREAU_MON by TARGET")
+```
+
+AMT_REQ_CREDIT_BUREAU_MON does not seem to differ for the levels of TARGET.
+
+**AMT_REQ_CREDIT_BUREAU_QRT**
+
+AMT_REQ_CREDIT_BUREAU_QRT: Number of inquiries to Credit Bureau about the client 3 month before application (excluding one month before application)
+
+```{r}
+# Boxplot of AMT_REQ_CREDIT_BUREAU_QRT by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), AMT_REQ_CREDIT_BUREAU_QRT)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of AMT_REQ_CREDIT_BUREAU_QRT by TARGET")
+```
+
+There seems to be an extreme outlier in the TARGET = 0 subgroup. 
+
+```{r}
+max(HomeCredit_application_train_data_clean$AMT_REQ_CREDIT_BUREAU_QRT)
+```
+
+This seems a bit unreasonable. Let's exclude it from the data set and then view the distribution again.
+
+```{r}
+HomeCredit_application_train_data_clean <- 
+  HomeCredit_application_train_data_clean %>%
+  filter(AMT_REQ_CREDIT_BUREAU_QRT < 100)
+
+# Boxplot of AMT_REQ_CREDIT_BUREAU_QRT by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), AMT_REQ_CREDIT_BUREAU_QRT)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of AMT_REQ_CREDIT_BUREAU_QRT by TARGET")
+```
+
+AMT_REQ_CREDIT_BUREAU_QRT does not seem to differ for the levels of TARGET.
+
+**AMT_REQ_CREDIT_BUREAU_YEAR**
+
+AMT_REQ_CREDIT_BUREAU_YEAR: Number of inquiries to Credit Bureau about the client one day year (excluding last 3 months before application)
+
+```{r}
+# Boxplot of AMT_REQ_CREDIT_BUREAU_YEAR by TARGET
+ggplot(HomeCredit_application_train_data_clean, 
+       aes(as.character(TARGET), AMT_REQ_CREDIT_BUREAU_YEAR)) + 
+  geom_boxplot(aes(fill = as.character(TARGET))) +
+  ggtitle("Boxplot of AMT_REQ_CREDIT_BUREAU_YEAR by TARGET")
+```
+
+AMT_REQ_CREDIT_BUREAU_YEAR does not seem to differ for the levels of TARGET.
+
+# Results
+
+Summarizing and discussing findings:
+
+## Available Data
+
+There are **206 predictor variables** available across the **7 available data sets**:
+
+  -   **120 predictors** in the **application train | test** data set (excluding ID and target variables: *SK_ID_CURR*, *TARGET*)
+  -   **15 predictors** in the **bureau** data set (excluding ID variables: *SK_ID_CURR*, *SK_BUREAU_ID*)
+  -   **2 predictors** in the **bureau balance** data set (excluding ID variables: *SK_BUREAU_ID*) 
+  -   **6 predictors** in the **POS CASH balance** data set (excluding ID variables: *SK_ID_PREV*, *SK_ID_CURR*)
+  -   **21 predictors** in the **credit card balance** data set (excluding ID variables: *SK_ID_PREV*, *SK_ID_CURR*)
+  -   **36 predictors** in the **previous application** data set (excluding ID variables: *SK_ID_PREV*, *SK_ID_CURR*)
+  -   **6 predictors** in the **installments payments** data set (excluding ID variables: *SK_ID_PREV*, *SK_ID_CURR*)
+  
+The final model will likely not include all predictors from all available data sets. Some data sets are provided at various levels of granularity and will potentially be excluded for simplicity's sake.
+
+This EDA is **focused on the application_train.csv** data set.
+
+## Target Variable
+
+The data is **highly imbalanced** with respect to the target. A majority class classifier would have an accuracy of 92%.
+
+## Missing Data
+
+The application_train.csv data set has **missing data** in 61 of the 122 columns.
+
+**Missing values** were addressed by:
+
+  -   Imputing missing values with the median
+  -   Binning numerical values, keeping a group for non-reported data points as to not lose information when the non-reported nature could provide information about the client
+  -   Replacing missing values with "0"
+
+## Near Zero Variance
+
+**Near zero variance** variables have very little variation or are mostly constant, which are often uninformative in predictive modeling sometimes leading to over fitting or instability.
+
+  -   50 near zero variance variables were detected and removed from the data set. 
+
+## Predictor-Target Variables
+
+After cleaning the missing values and removing near zero variance variables, we were left with **70 predictor variables** from the application_train.csv data set:
+
+  -   **35 categorical variables**
+  -   **35 numeric variables**
+
+Relationships in the train data set to note:
+
+  -   Male clients were more likely to default than female clients (10% of males defaulted compared to 7% of females).
+  -   Clients on Maternity Leave or who are Unemployed are most likely to default (40% of clients on Maternity Leave and 36% of Unemployed clients defaulted).
+  -   Clients with a "lower secondary" education type were the most likely to default, with a default rate of 11%.
+  -   Clients who rented their apartment or live with their parents were most likely to default, both with a default rate of 12%.
+  -   Low-skill laborers were the most likely to default, with a default rate of 17%.
+  -   Default rate seemed to vary vastly for the various organization types the clients worked for.
+  -   Clients with low normalized scores had the highest default rate across all three external sources (~15% default rate).
+  -   Clients who defaulted tended to, on average, had a lower total income than those who didn't.
+  -   Clients who defaulted tended to, on average, were younger than those who didn't.
+  -   The normalized information about building where the client lives did not tend to differ between the default and non-default groups. 
+  
+## Next Steps
+
+Next steps include exploring potential models and comparing those models to the accuracy of the majority class classifier. 
+
