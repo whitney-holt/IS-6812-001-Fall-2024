@@ -12,7 +12,7 @@ This project aims to build a predictive model that evaluates the loan repayment 
 # Solution to the Business Problem  
 With an AUC score of 0.70311, our group's ensemble model reliably distinguishes between high-risk and low-risk borrowers. By integrating predictions from Random Forest, BART, Logistic Regression, and Extra Trees, this approach captures diverse aspects of the data for improved accuracy. The model offers Home Credit an opportunity to expand access to fair lending options for individuals who might otherwise have been excluded due to a lack of credit history.  
 
-# The Business Value of the Solution  
+# Business Value of the Solution  
 By employing this predictive model, Home Credit has the potential to assess applicants based on alternative data, responsibly expanding credit access. This expansion will not only drive revenue growth for Home Credit but also balance increased loan approvals with low default rates. The result is growth that is both profitable and sustainable, ultimately enhancing Home Credit's competitive advantage.  
 
 # Difficulties Encountered Along the Way  
