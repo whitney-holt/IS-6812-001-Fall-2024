@@ -9,7 +9,7 @@ Home Credit is an international consumer finance provider focused on responsibly
 This project aims to build a predictive model that evaluates loan repayment capability for individuals with limited or no traditional credit history. A successful model will allow Home Credit to assess applicants based on alternative data, expanding credit access responsibly.
 
 # Solution to the business problem
-With an AUC score of 0.70311, our group's ensemble model reliably distinguishes between high-risk and low-risk borrowers. By integrating predictions from Random Forest, BART, Logistic Regression, and Extra Trees, this approach captures diverse aspects of the data for improved prediction. The model offers Home Credit an inclusive and data-driven solution for loan approval, potentially expanding access to fair lending options for individuals who might otherwise be excluded due to a lack of credit history.
+With an AUC score of 0.70311, our group's ensemble model reliably distinguishes between high-risk and low-risk borrowers. By integrating predictions from Random Forest, BART, Logistic Regression, and Extra Trees, this approach captures diverse aspects of the data for improved prediction. The model offers Home Credit an opportunity to expand access to fair lending options for individuals who might otherwise have been excluded due to a lack of credit history.
 
 # The business value of the solution
 The business problem centers on accurately determining creditworthiness for customers lacking formal credit scores. Without this information, capable borrowers often face loan denial or are subjected to predatory lending. The ensemble model effectively addresses this gap by leveraging alternative financial behaviors to predict loan default, providing a more comprehensive measure of creditworthiness than traditional scores alone.
@@ -18,11 +18,11 @@ The business problem centers on accurately determining creditworthiness for cust
 
 ## Exploratory Data Anlaysis
 
+  -  Highly Imbalanced Target Variable
   -  Missing Values
   -  High Cardinality in Categorical Values
-  -  Highly Imbalanced Target Variable
   -  Inconsistent Factor Levels
-  -  Collinearity among predictors
+  -  Collinearity Among Predictors
   -  Potential Outliers & Noise
 
 ## Modeling
