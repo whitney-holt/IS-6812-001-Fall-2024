@@ -11,10 +11,13 @@ This project aims to build a predictive model that evaluates loan repayment capa
 
 # Solution to the business problem
 
+# The business value of the solution
+
+
 
 # Difficulties encountered along the way
 
-# The business value of the solution
+
 
 # My contribution to the project
 
@@ -27,20 +30,16 @@ Working with 3 phenominal teammates, my cotributions to the project were:
   -  Creating a slide deck for the presenation each team member could access and edit
   -  Coordinating group meeings, setting up zoom meetings and coordinating schedules
 
-# What I learned in the project
+# Lessons Learned
 
 ## Trying various applications of multiple models is crucial
 
-Through the modeling process, it became clear that exploring different model types and configurations is important; While some models may perform well with minimal tuning, others require extensive parameter adjustments or specialized techniques to bring out their full potential.
+Exploring different model types and configurations is important; While some models perform well with minimal tuning, others require extensive parameter adjustments to maximize performance.
 
 ## The raw data alone is not sufficient — feature selection and engineering were key to improving model performance
 
-By creating additional features were able to capture meaningful patterns that better represented an applicant’s financial behavior and stability. Feature selection also played a role in improving model performance.
+Creating additional features captured meaningful patterns that better represented an applicant’s financial behavior and stability. Feature selection also played a role in improving model performance.
 
 ## No single model is likely to solve complex business problems - ensemble models often provide the best solution
 
-Throughout testing, it became evident that no single model did a great job of capturing the complexity of the data. Some models, like BART and LightGBM, offered strong individual results, but combining them in an ensemble added predictive accuracy. Ultimately, the ensemble model outperformed any single algorithm by combining various predictions into a single more robust prediction.
-
-## Including additional data does not always have a high return on investment
-
-The inclusion of several feature engineered columns from previous_application.csv may have marginally increased model performance and provided a more comprehensive view of each individual. This marginal increase may not be worth the additional time and effort required to include the columns.
+No single model did a great job of capturing the complexity of the data. Some models, like BART and LightGBM, offered strong individual results, but combining them in an ensemble improved predictive accuracy. Ultimately, the ensemble model outperformed any single algorithm by combining various predictions into a single more robust prediction.
