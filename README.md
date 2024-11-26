@@ -12,11 +12,11 @@ This project aims to build a predictive model that evaluates loan repayment capa
 With an AUC score of 0.70311, our group's ensemble model reliably distinguishes between high-risk and low-risk borrowers. By integrating predictions from Random Forest, BART, Logistic Regression, and Extra Trees, this approach captures diverse aspects of the data for improved prediction. The model offers Home Credit an opportunity to expand access to fair lending options for individuals who might otherwise have been excluded due to a lack of credit history.
 
 # The business value of the solution
-The business problem centers on accurately determining creditworthiness for customers lacking formal credit scores. Without this information, capable borrowers often face loan denial or are subjected to predatory lending. The ensemble model effectively addresses this gap by leveraging alternative financial behaviors to predict loan default, providing a more comprehensive measure of creditworthiness than traditional scores alone.
+By employing this predictive model, Home Credit has the potential to assess applicants based on alternative data, expanding credit access responsibly. This expansion of credit access will drive revenue growth for Home Credit. The model allows for balance between increasing loan approvals and keeping default rates low, ensuring that the growth is both profitable and sustainable, ultimately providing Home Credit with an enhanced competitive advantage. 
 
 # Difficulties encountered along the way
 
-## Exploratory Data Anlaysis
+## Exploratory Data Analysis
 
   -  Highly Imbalanced Target Variable
   -  Missing Values
@@ -28,17 +28,17 @@ The business problem centers on accurately determining creditworthiness for cust
 ## Modeling
 
   -  The data set is extremely large, and training a model with more than 5% of the training data set would be incredibly computationally intensive.
-  -  A balanced subset of teh data needed to be created in order to efficiently build models, but this likley decreased the model's potential predictive power.
+  -  A balanced subset of the data needed to be created in order to efficiently build models, but this likely decreased the model's potential predictive power.
 
 # My contribution to the project
-Working with 3 phenominal teammates, my personal cotributions to the project were:
+Working with 3 phenomenal teammates, my personal contributions to the project were:
 
   -  Conducting independent Exploratory Data Analysis (EDA)
-  -  Building several predictive models, including: majority classifier, logistic regression, penalized regression, and Naive Bayes
+  -  Building several predictive models, including a majority classifier, logistic regression, penalized regression, and Naive Bayes
   -  Acting as a scribe for our team when creating the group modeling notebook
   -  Independently drafting several sections of the group modeling notebook, including "Main Takeaways"
-  -  Creating a slide deck for the presenation each team member could access and edit
-  -  Coordinating group meeings, setting up zoom meetings and coordinating schedules
+  -  Creating a slide deck for the presentation each team member could access and edit
+  -  Coordinating group meetings, setting up zoom meetings and coordinating schedules
 
 # Lessons Learned
 
